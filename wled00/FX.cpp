@@ -4227,3 +4227,61 @@ uint16_t WS2812FX::mode_aurora(void) {
   
   return FRAMETIME;
 }
+
+uint16_t WS2812FX::mode_custom(void) {
+  //aux1 = Wavecount
+  //aux2 = Intensity in last loop
+
+  AuroraWave* waves;
+
+  if(SEGENV.aux0 != SEGMENT.intensity || SEGENV.call == 0) {
+    //Intensity slider changed or first call
+    SEGENV.aux1 = map(SEGMENT.intensity, 0, 255, 2, W_MAX_COUNT);
+    SEGENV.aux0 = SEGMENT.intensity;
+
+    if(!SEGENV.allocateData(sizeof(AuroraWave) * SEGENV.aux1)) { // 26 on 32 segment ESP32, 9 on 16 segment ESP8266
+      return mode_static(); //allocation failed
+    }
+
+    waves = reinterpret_cast<AuroraWave*>(SEGENV.data);
+
+    for(int i = 0; i < SEGENV.aux1; i++) {
+      waves[i].init(SEGLEN, col_to_crgb(color_from_palette(random8(), false, false, random(0, 3))));
+    }
+  } else {
+    waves = reinterpret_cast<AuroraWave*>(SEGENV.data);
+  }
+
+  for(int i = 0; i < SEGENV.aux1; i++) {
+    //Update values of wave
+    waves[i].update(SEGLEN, SEGMENT.speed);
+
+    if(!(waves[i].stillAlive())) {
+      //If a wave dies, reinitialize it starts over.
+      waves[i].init(SEGLEN, col_to_crgb(color_from_palette(random8(), false, false, random(0, 3))));
+    }
+  }
+
+  uint8_t backlight = 1; //dimmer backlight if less active colors
+  if (SEGCOLOR(0)) backlight++;
+  if (SEGCOLOR(1)) backlight++;
+  if (SEGCOLOR(2)) backlight++;
+  //Loop through LEDs to determine color
+  for(int i = 0; i < SEGLEN; i++) {    
+    CRGB mixedRgb = CRGB(backlight, backlight, backlight);
+
+    //For each LED we must check each wave if it is "active" at this position.
+    //If there are multiple waves active on a LED we multiply their values.
+    for(int  j = 0; j < SEGENV.aux1; j++) {
+      CRGB rgb = waves[j].getColorForLED(i);
+      
+      if(rgb != CRGB(0)) {       
+        mixedRgb += rgb;
+      }
+    }
+
+    setPixelColor(i, mixedRgb[0], mixedRgb[1], mixedRgb[2]);
+  }
+  
+  return FRAMETIME;
+}
